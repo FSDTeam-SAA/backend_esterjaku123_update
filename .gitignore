@@ -24,7 +24,6 @@ coverage/
 .eslintcache
 
 # IDEs and Editors
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -51,8 +50,6 @@ public/uploads/
 docker-compose.override.yml
 
 
-.env
-.env.*
 !.env.example
 
 
@@ -61,3 +58,7 @@ docker-compose.override.yml
 *.seed
 *.pid.lock
 config.bat
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore

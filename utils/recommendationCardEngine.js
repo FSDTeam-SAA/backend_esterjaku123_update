@@ -138,15 +138,19 @@ const generateAndStoreAsset = async (key, definition) => {
 
   const imageModel = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
   try {
-    const response = await openai.images.generate({
-      model: imageModel,
-      prompt: definition.prompt,
-      size: "1536x1024",
-      quality: "low",
-      output_format: "png",
-      n: 1,
-      user: `recommendation-card-${key}`,
-    });
+    const response = await openai.images.generate(
+      {
+        model: imageModel,
+        prompt: definition.prompt,
+        size: "1536x1024",
+        quality: "low",
+        output_format: "png",
+        n: 1,
+        user: `recommendation-card-${key}`,
+      },
+      // Hard cap so a slow/hung image call can't keep an in-flight job alive forever.
+      { timeout: 30000 },
+    );
 
     const b64 = response.data?.[0]?.b64_json;
     if (!b64) throw new Error("Image generation did not return b64_json");
@@ -192,6 +196,21 @@ const generateAndStoreAsset = async (key, definition) => {
   }
 };
 
+// Tracks keys currently generating so a burst of check-ins doesn't spawn
+// several parallel image generations for the same card.
+const inFlight = new Set();
+
+const generateInBackground = (key, definition) => {
+  if (inFlight.has(key)) return;
+  inFlight.add(key);
+  // Intentionally not awaited: the image is produced out of the request path.
+  generateAndStoreAsset(key, definition)
+    .catch((err) =>
+      console.error("Background card generation error:", err.message),
+    )
+    .finally(() => inFlight.delete(key));
+};
+
 const getCachedAsset = async (key) => {
   const definition = CARD_DEFINITIONS[normalizeKey(key)];
   const asset = await RecommendationCardAsset.findOne({
@@ -207,9 +226,12 @@ const getCachedAsset = async (key) => {
     status: "failed",
     updatedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
   });
-  if (lastFailed) return null;
 
-  return generateAndStoreAsset(key, definition);
+  // Not cached yet (and not recently failed): generate in the background so the
+  // image is ready on a later load, and return null now so the Check response
+  // is never blocked on image generation.
+  if (!lastFailed) generateInBackground(key, definition);
+  return null;
 };
 
 export const buildRecommendationCard = async ({ history, currentDoc, whatIf }) => {
